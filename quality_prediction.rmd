@@ -1,0 +1,169 @@
+---
+title: "Qualitative Activity Recognition"
+author: "Daria Karpova"
+date: "5/1/2021"
+output: html_document
+---
+
+### About this project
+
+This project has been created for **Getting and Cleaning Data** course project from 'Data Science Specialization' on Coursera provided by 'Johns Hopkins University'. The goal is to predict the quality of performed activies based on the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The utilized dataset is the **Weight Lifting Exercises Dataset** presented in the following paper:
+
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.*
+
+Read more: http:/groupware.les.inf.puc-rio.br/har#ixzz4TjtH0uqp
+
+The dataset description can be found here:
+
+http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+The training data for this project is available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data is available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+### Loading data
+```{r, warning=FALSE, message=FALSE}
+library(knitr)
+library(caret)
+library(randomForest)
+library(mlbench)
+library(stringr)
+library(lubridate)
+library(dplyr)
+
+#Downloading and extracting data
+train_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+train_filename = "pml-training.csv"
+test_filename = "pml-testing.csv"
+
+if (!file.exists(train_filename)) {
+  download.file(train_url, train_filename)
+}
+
+if (!file.exists(test_filename)) {
+  download.file(test_url, test_filename)
+}
+
+train_set <- read.csv(train_filename, header=TRUE)
+test_set <- read.csv(test_filename, header=TRUE)
+```
+
+### Exploring and preprocessing data
+
+The data has a lot of columns consisting mostly of NA's both in the training and the test sets. Since columns containing pretty much only NA values won't give us any valuable information let's remove those columns with more than half of the rows missing.
+
+```{r}
+kable(head(train_set))
+
+# Removing columns with more than 5000 missing values
+dim(train_set)
+dim(test_set)
+
+cols_to_leave <- colSums(is.na(train_set)) < 10000 
+train_set <- train_set[, cols_to_leave] 
+test_set <- test_set[, cols_to_leave] 
+
+dim(train_set)
+dim(test_set)
+```
+
+Now our test consists out of 93 variables. Observing the data has shown some variables to contain empty strings instead of NA's, let's remove those ones as well.
+
+```{r}
+cols_to_leave <- colSums(train_set != "") > 10000
+train_set <- train_set[, cols_to_leave]
+test_set <- test_set[, cols_to_leave]
+
+dim(train_set)
+dim(test_set)
+```
+
+Another two variables which won't help us much are X and user_name. In fact, training with those two will only hurt our test accuracy since a test set may consist of data collected from people not presented on the training set. Therefore, 'X' and 'user_name' are going to be dropped.
+
+```{r}
+#Removing columns which do not contribute to the prediction
+train_set <- subset(train_set, select = -c(X, user_name))
+test_set <- subset(test_set, select = -c(X, user_name))
+```
+
+Now we have 2 char variables left: 'cvtd_timestamp' and 'new_window'. Let's convert them to numeric types.
+
+```{r}
+#Transforming 'new_window' into a factor variable
+train_set$new_window <- as.factor(train_set$new_window)
+test_set$new_window <- as.factor(test_set$new_window)
+
+train_set$new_window <- as.numeric(train_set$new_window) - 1
+test_set$new_window <- as.numeric(test_set$new_window) - 1
+
+#Converting to datetime
+train_set$datetime = dmy_hm(train_set$cvtd_timestamp)
+test_set$datetime = dmy_hm(test_set$cvtd_timestamp)
+
+#Extracting valuable information for the train set
+train_set$year = year(train_set$datetime)
+train_set$month = month(train_set$datetime)
+train_set$day_of_month = mday(train_set$datetime)
+train_set$day_of_year = yday(train_set$datetime)
+train_set$weekday = wday(train_set$datetime)
+train_set$hours = hour(train_set$datetime)
+train_set$minutes = minute(train_set$datetime)
+
+#Extracting valuable information for the test set
+test_set$year = year(test_set$datetime)
+test_set$month = month(test_set$datetime)
+test_set$day_of_month = mday(test_set$datetime)
+test_set$day_of_year = yday(test_set$datetime)
+test_set$weekday = wday(test_set$datetime)
+test_set$hours = hour(test_set$datetime)
+test_set$minutes = minute(test_set$datetime)
+
+#Removing the original timastamp columns
+train_set <- subset(train_set, select = -c(cvtd_timestamp, datetime))
+test_set <- subset(test_set, select = -c(cvtd_timestamp, datetime))
+```
+
+Before we start training our model let's check if there are any missing values or non-numeric columns left.
+
+```{r}
+#Checking for missing values
+missing_num<-sum(is.na(train_set)) + sum(is.na(test_set))
+missing_num
+
+#Checking the column types
+train_set %>% select_if(~!is.numeric(.x)) %>% head()
+test_set %>% select_if(~!is.numeric(.x)) %>% head()
+```
+
+The last char column is the value we predict - 'classe'. Let's factorize it before we start training.
+
+```{r}
+#Transforming 'new_window' into a factor variable
+train_set$classe <- as.factor(train_set$classe)
+```
+
+### Training
+
+The variable we will be trying to predict is called 'Classe'. To perform that random forest classifier will be used. As R's randomForest automatically uses OOB score no validation set is needed.   
+
+```{r}
+set.seed(123)
+rf_classifier = randomForest(classe ~ ., data=train_set, ntree=100, mtry=2, importance=TRUE)
+rf_classifier
+```
+
+OOB estimate of  error rate is 0.3% which is very good and means 99.7% accuracy on the validation set.
+
+### Predicting
+
+```{r}
+prediction_for_table <- predict(rf_classifier, test_set)
+prediction_for_table
+```
