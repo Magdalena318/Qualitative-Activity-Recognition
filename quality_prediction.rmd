@@ -36,7 +36,6 @@ library(stringr)
 library(lubridate)
 library(dplyr)
 
-#Downloading and extracting data
 train_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 test_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 
@@ -60,8 +59,6 @@ test_set <- read.csv(test_filename, header=TRUE)
 The data has a lot of columns consisting mostly of NA's both in the training and the test sets. Since columns containing pretty much only NA values won't give us any valuable information let's remove those columns with more than half of the rows missing.
 
 ```{r}
-kable(head(train_set))
-
 # Removing columns with more than 5000 missing values
 dim(train_set)
 dim(test_set)
@@ -159,11 +156,14 @@ rf_classifier = randomForest(classe ~ ., data=train_set, ntree=100, mtry=2, impo
 rf_classifier
 ```
 
-OOB estimate of  error rate is 0.3% which is very good and means 99.7% accuracy on the validation set.
+OOB estimate of  error rate is 0.3% which is a very good result and means 99.7% accuracy on the validation set.
 
 ### Predicting
+
+Now let's predict the quality of the performed activities for the test set.
 
 ```{r}
 prediction_for_table <- predict(rf_classifier, test_set)
 prediction_for_table
 ```
+Accessing project quiz has shown that all of the predictions were correct.
